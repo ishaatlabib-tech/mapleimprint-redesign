@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Minus, Plus, SpinnerGap } from "@phosphor-icons/react/dist/ssr";
 import { cn } from "@/lib/cn";
-import { useCart, QUOTE_PREFILL_KEY } from "@/components/cart/CartProvider";
+import { useCart, QUOTE_PREFILL_KEY, QUOTE_CART_LINES_KEY, type QuoteCartHandoff } from "@/components/cart/CartProvider";
 import { getOrCreateClientSessionToken } from "@/lib/studio/session";
 import { blankUnitPrice, calculateCustomizePrice } from "@/lib/studio/pricing";
 import { standardLocationsFor } from "@/lib/studio/productDecorationProfile";
@@ -255,6 +255,20 @@ function ApparelCustomizer({
   function handleRequestQuote() {
     const summary = `${product.name}${selectedColour ? ` (${selectedColour})` : ""}`;
     window.sessionStorage.setItem(QUOTE_PREFILL_KEY, summary);
+    // No Studio design/pricing exists for this path (apparel with no catalogue pricing) — still
+    // worth a real structured line, same reasoning as QuoteOnlyConfigurator's own fix.
+    const line: QuoteCartHandoff = {
+      cartItemId: `apparel-quote-${product.slug}-${selectedColour}-${crypto.randomUUID()}`,
+      name: product.name,
+      quantity: totalQty || 1,
+      categorySlug: product.categorySlug,
+      categoryName,
+      subcategorySlug: product.subcategorySlug,
+      productSlug: product.slug,
+      colourName: selectedColour,
+      sizeBreakdown,
+    };
+    window.sessionStorage.setItem(QUOTE_CART_LINES_KEY, JSON.stringify([line]));
     router.push("/contact?type=quote");
   }
 

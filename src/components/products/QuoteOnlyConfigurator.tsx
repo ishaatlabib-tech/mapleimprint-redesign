@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { QUOTE_PREFILL_KEY } from "@/components/cart/CartProvider";
+import { QUOTE_PREFILL_KEY, QUOTE_CART_LINES_KEY, type QuoteCartHandoff } from "@/components/cart/CartProvider";
 import type { CatalogueProduct } from "@/lib/products";
 
 /** For real VistaPrint product types whose live per-configuration pricing sits behind a JS
@@ -22,6 +22,18 @@ export function QuoteOnlyConfigurator({
 
   function handleRequestQuote() {
     window.sessionStorage.setItem(QUOTE_PREFILL_KEY, product.name);
+    // No Studio design exists for this path (that's the whole reason this component exists) —
+    // still worth a real structured line so staff get queryable product/colour data instead of
+    // parsing it back out of free text, same reasoning as the mixed-cart fix in CartView.
+    const line: QuoteCartHandoff = {
+      cartItemId: `quote-only-${product.slug}-${crypto.randomUUID()}`,
+      name: product.name,
+      quantity: 1,
+      categorySlug: product.categorySlug,
+      subcategorySlug: product.subcategorySlug,
+      productSlug: product.slug,
+    };
+    window.sessionStorage.setItem(QUOTE_CART_LINES_KEY, JSON.stringify([line]));
     router.push("/contact?type=quote");
   }
 

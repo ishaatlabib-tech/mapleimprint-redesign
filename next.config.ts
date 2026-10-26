@@ -25,6 +25,11 @@ const SQUARE_CSP = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  // @napi-rs/canvas (server-side production-file export, src/lib/studio/renderDesignForExport.ts)
+  // ships a native .node binary — Turbopack can't bundle that into an ESM chunk ("asset is not
+  // placeable in ESM chunks"), so it needs to stay a real require()'d external at runtime instead
+  // of being bundled, same as any other native-addon dependency.
+  serverExternalPackages: ["@napi-rs/canvas"],
   // Retired house products replaced by the client's price-listed versions (printCatalogue.ts).
   async redirects() {
     return [

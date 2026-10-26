@@ -82,6 +82,8 @@ const Flat3DPreview = dynamic(() => import("@/components/studio/Flat3DPreview").
 type SidesState = Partial<Record<DesignSideType, DesignObjectRecord[]>>;
 
 const AUTOSAVE_DELAY_MS = 900;
+// Draft-restoration hardening (Scenario D) — see saveNow's retry loop below.
+const SAVE_RETRY_DELAYS_MS = [1000, 3000, 8000];
 
 
 function emptyObject(type: "text" | "image" | "shape" | "qr", overrides: Partial<DesignObjectRecord>): DesignObjectRecord {
@@ -352,6 +354,10 @@ export function StudioClient({ projectId }: { projectId: string }) {
   // Extracted so "Back to Product" can flush a pending save immediately instead of either losing
   // it (a plain navigation would abandon the debounce timer) or forcing the customer through a
   // "you have unsaved changes" confirmation modal for something Studio can just finish on its own.
+  // A bare network blip previously set saveStatus to "error" and gave up — the design change the
+  // customer just made was never persisted, and nothing stopped them from closing the tab none
+  // the wiser. Retries with backoff before surfacing an error at all; a 409 (design already
+  // frozen) is never retried since no amount of retrying fixes that.
   const saveNow = useCallback(
     async (sidesToSave: SidesState) => {
       const payload = {
@@ -363,19 +369,47 @@ export function StudioClient({ projectId }: { projectId: string }) {
           }),
         })),
       };
-      try {
-        const res = await fetch(`/api/studio/${projectId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        setSaveStatus(res.ok ? "saved" : "error");
-      } catch {
-        setSaveStatus("error");
+      for (let attempt = 0; attempt <= SAVE_RETRY_DELAYS_MS.length; attempt++) {
+        try {
+          const res = await fetch(`/api/studio/${projectId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) {
+            setSaveStatus("saved");
+            return;
+          }
+          if (res.status === 409) {
+            // Finalized design — retrying can't help, and shouldn't silently keep trying to save
+            // over something the customer already approved.
+            setSaveStatus("error");
+            return;
+          }
+        } catch {
+          // Network failure — fall through to retry below.
+        }
+        if (attempt < SAVE_RETRY_DELAYS_MS.length) {
+          await new Promise((resolve) => setTimeout(resolve, SAVE_RETRY_DELAYS_MS[attempt]));
+        }
       }
+      setSaveStatus("error");
     },
     [projectId],
   );
+
+  // Warn before the tab closes with real unsaved risk — "saving" covers the retry window above
+  // (a request may still be in flight or about to retry), "error" covers exhausted retries. Not
+  // registered for "idle"/"saved", so this never nags on a genuinely clean exit.
+  useEffect(() => {
+    if (saveStatus !== "saving" && saveStatus !== "error") return;
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [saveStatus]);
 
   useEffect(() => {
     if (!project || !dirtySinceLoad.current) return;

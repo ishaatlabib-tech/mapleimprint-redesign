@@ -34,9 +34,22 @@ function getMeasureContext(): CanvasRenderingContext2D | null {
   return measureCtx;
 }
 
-function glyphAdvance(char: string, fontSize: number, fontFamily: string, bold: boolean, italic: boolean): number {
+/** Minimal shape both the browser's native CanvasRenderingContext2D and @napi-rs/canvas's
+ *  server-side equivalent satisfy — just enough for glyph measurement. */
+export interface TextMeasurer {
+  font: string;
+  measureText(text: string): { width: number };
+}
+
+function glyphAdvance(
+  char: string,
+  fontSize: number,
+  fontFamily: string,
+  bold: boolean,
+  italic: boolean,
+  ctx: TextMeasurer | null,
+): number {
   if (char === " ") return fontSize * 0.28;
-  const ctx = getMeasureContext();
   if (!ctx) return fontSize * 0.58; // SSR/no-canvas fallback — never hit in practice, see comment above
   const style = `${italic ? "italic " : ""}${bold ? "700" : "400"} ${fontSize}px ${fontFamily}`;
   ctx.font = style;
@@ -51,13 +64,21 @@ export function layoutCurvedText(
   fontFamily = "Manrope, sans-serif",
   bold = false,
   italic = false,
+  /** Injected so the server-side export renderer (src/lib/studio/renderDesignForExport.ts, which
+   *  has no `document`) can pass its own @napi-rs/canvas context — defaults to the lazy
+   *  browser-only singleton above, so every existing CanvasStage call site (which never passes
+   *  this) keeps its exact original behavior unchanged. */
+  measurer: TextMeasurer | null | undefined = undefined,
 ): CurvedGlyph[] {
   if (!curve) return [];
   const radius = RADIUS_CONSTANT / Math.abs(curve);
   const direction = curve > 0 ? 1 : -1;
 
+  const resolvedMeasurer = measurer === undefined ? getMeasureContext() : measurer;
   const glyphs = [...text];
-  const advances = glyphs.map((c) => glyphAdvance(c, fontSize, fontFamily, bold, italic) + letterSpacing);
+  const advances = glyphs.map(
+    (c) => glyphAdvance(c, fontSize, fontFamily, bold, italic, resolvedMeasurer) + letterSpacing,
+  );
   const totalWidth = advances.reduce((a, b) => a + b, 0);
   const totalAngle = totalWidth / radius;
 

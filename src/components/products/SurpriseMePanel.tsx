@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, Check, SpinnerGap, UploadSimple } from "@phosphor-icons/react/dist/ssr";
 import { useCart } from "@/components/cart/CartProvider";
 import { heroImageFor } from "@/lib/productVariant";
+import { getOrCreateClientSessionToken } from "@/lib/studio/session";
 import type { CatalogueProduct } from "@/lib/products";
 
 type Purpose = "business" | "team" | "event" | "gift" | "personal" | "clothing-brand" | "other";
@@ -50,6 +51,7 @@ export function SurpriseMePanel({
   const [includeNotes, setIncludeNotes] = useState("");
   const [avoidNotes, setAvoidNotes] = useState("");
   const [uploadedFileUrl, setUploadedFileUrl] = useState<string | null>(null);
+  const [uploadedAssetId, setUploadedAssetId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -58,12 +60,17 @@ export function SurpriseMePanel({
     setUploading(true);
     setUploadError(null);
     try {
+      // Opening this panel doesn't guarantee the customer has touched Studio yet (no other
+      // product configurator entry point runs first) — same defensive call every configurator
+      // makes before its own first upload.
+      getOrCreateClientSessionToken();
       const formData = new FormData();
       formData.append("file", file);
       const res = await fetch("/api/studio/upload", { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Upload failed.");
       setUploadedFileUrl(data.url);
+      setUploadedAssetId(data.assetId ?? null);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed.");
     } finally {
@@ -84,7 +91,14 @@ export function SurpriseMePanel({
         colourName: selectedColour,
         sizeBreakdown,
         customizationType: "MAPLE_DESIGNER",
-        assistanceBrief: { purpose, vibe, includeNotes, avoidNotes, uploadedFileUrl: uploadedFileUrl ?? undefined },
+        assistanceBrief: {
+          purpose,
+          vibe,
+          includeNotes,
+          avoidNotes,
+          uploadedFileUrl: uploadedFileUrl ?? undefined,
+          uploadedAssetId: uploadedAssetId ?? undefined,
+        },
       },
       totalQuantity,
     );

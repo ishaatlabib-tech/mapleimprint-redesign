@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendEmail } from "@/lib/automation/email/resend";
 import { orderConfirmationEmail } from "@/lib/automation/email/templates";
+import { triggerDesignExport } from "@/lib/studio/exportDesign";
 
 /**
  * The single place an order is marked PAID and notified — called from BOTH the synchronous
@@ -48,6 +49,18 @@ export async function markOrderPaidAndNotify(
 
   await sendEmail({ to: transitioned.contactEmail, subject, html, text });
   await supabaseAdmin.from("MapleOrder").update({ emailSentAt: new Date().toISOString() }).eq("id", orderId);
+
+  // Production file export (300dpi PNG + SVG where vector-eligible) for every CUSTOM line —
+  // customer's payment confirmation must never wait on this, so each line is triggered
+  // fire-and-forget rather than awaited in sequence. Uses the service-role client since there's
+  // no customer session cookie available in a webhook/server-to-server context; safe because
+  // triggerDesignExport only ever touches the one DesignProject row it's given.
+  for (const line of lines ?? []) {
+    if (!line.designProjectId) continue;
+    triggerDesignExport(supabaseAdmin, line.designProjectId).catch((err) =>
+      console.error("[checkout] export trigger failed for line", line.id, err),
+    );
+  }
 
   // Separate, best-effort production handoff to n8n — isolated in its own try/catch so an n8n
   // outage (or the env var being unset, e.g. in local dev) never blocks the customer email or the

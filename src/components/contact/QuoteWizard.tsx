@@ -13,7 +13,8 @@ import {
   TextInput,
 } from "@/components/ui/Field";
 import { cn } from "@/lib/cn";
-import { QUOTE_PREFILL_KEY } from "@/components/cart/CartProvider";
+import { QUOTE_PREFILL_KEY, QUOTE_CART_LINES_KEY, type QuoteCartHandoff } from "@/components/cart/CartProvider";
+import { getOrCreateClientSessionToken } from "@/lib/studio/session";
 
 type ProjectType =
   | "apparel"
@@ -28,7 +29,7 @@ type ProjectType =
 type DeliveryMethod = "pickup" | "shipping";
 type ContactMethod = "email" | "phone";
 
-type UploadedFile = { fileId: string; fileName: string; webViewLink: string | null };
+type UploadedFile = { fileId: string; fileName: string; webViewLink: string | null; assetId?: string };
 
 type QuoteData = {
   projectType: ProjectType | null;
@@ -110,6 +111,11 @@ export function QuoteWizard() {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [cartLines, setCartLines] = useState<QuoteCartHandoff[]>([]);
+  // Generated once per mount, reused across every submit retry (including a double-click or a
+  // network-error retry) so /api/quote's idempotency check can recognize a resubmission instead
+  // of creating a second QuoteRequest with a second reference.
+  const [idempotencyKey] = useState(() => crypto.randomUUID());
 
   useEffect(() => {
     // One-shot read from a browser-only external store (sessionStorage) on
@@ -119,6 +125,20 @@ export function QuoteWizard() {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setData((prev) => (prev.productDescription ? prev : { ...prev, productDescription: prefill }));
       window.sessionStorage.removeItem(QUOTE_PREFILL_KEY);
+    }
+    // Structured counterpart to the text prefill above — carries real designProjectId/
+    // assistanceBrief/etc. through instead of collapsing the cart into a string (see
+    // CartView.handleGetQuote). Kept separate from the text key since QuoteData.productDescription
+    // still wants a human-readable summary regardless of whether structure is also available.
+    const rawLines = window.sessionStorage.getItem(QUOTE_CART_LINES_KEY);
+    if (rawLines) {
+      try {
+        setCartLines(JSON.parse(rawLines));
+      } catch {
+        // Malformed/stale sessionStorage value — fail open to an empty array rather than block
+        // the wizard; the free-text prefill above still carries a human-readable summary.
+      }
+      window.sessionStorage.removeItem(QUOTE_CART_LINES_KEY);
     }
   }, []);
 
@@ -158,6 +178,11 @@ export function QuoteWizard() {
     setUploadError(null);
     setUploading(true);
     try {
+      // Establishes the shared mi-session cookie if this is the customer's first upload anywhere
+      // on the site (e.g. they landed straight on /contact?type=quote) — /api/upload now requires
+      // it, same as /api/studio/upload, so every Asset row is owner-scoped consistently regardless
+      // of entry point.
+      getOrCreateClientSessionToken();
       const uploaded: UploadedFile[] = [];
       for (const file of Array.from(files)) {
         const formData = new FormData();
@@ -193,7 +218,7 @@ export function QuoteWizard() {
       const res = await fetch("/api/quote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, idempotencyKey, cartLines }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Something went wrong.");

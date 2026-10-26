@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Minus, Plus, ShoppingBag, Trash } from "@phosphor-icons/react/dist/ssr";
 import { Button } from "@/components/ui/Button";
 import { Container } from "@/components/ui/Container";
-import { useCart, QUOTE_PREFILL_KEY } from "@/components/cart/CartProvider";
+import { useCart, QUOTE_PREFILL_KEY, QUOTE_CART_LINES_KEY, type QuoteCartHandoff } from "@/components/cart/CartProvider";
 import { PRIMARY_CTA } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { unitPriceFor } from "@/lib/pricing/cartItemPrice";
@@ -22,6 +22,26 @@ export function CartView() {
   function handleGetQuote() {
     const summary = items.map((i) => `${i.name} x${i.quantity}`).join(", ");
     window.sessionStorage.setItem(QUOTE_PREFILL_KEY, summary);
+    // Forward the real cart structure alongside the text summary — previously this was the only
+    // thing written, which silently dropped every frozen Studio design (designProjectId/
+    // designFrozenRevision) and Mystery/Designer's Choice brief (assistanceBrief, including its
+    // uploaded file) the moment a mixed cart needed a quote instead of checkout.
+    const lines: QuoteCartHandoff[] = items.map((i) => ({
+      cartItemId: i.id,
+      name: i.name,
+      quantity: i.quantity,
+      categorySlug: i.categorySlug,
+      categoryName: i.categoryName,
+      colourName: i.colourName,
+      sizeBreakdown: i.sizeBreakdown,
+      customizationType: i.customizationType,
+      designProjectId: i.designProjectId,
+      designFrozenRevision: i.designFrozenRevision,
+      assistanceBrief: i.assistanceBrief,
+      productSlug: i.productSlug,
+      subcategorySlug: i.subcategorySlug,
+    }));
+    window.sessionStorage.setItem(QUOTE_CART_LINES_KEY, JSON.stringify(lines));
     router.push("/contact?type=quote");
   }
 

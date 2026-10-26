@@ -73,6 +73,12 @@ export interface DesignObjectRecord {
   id: string;
   type: DesignObjectType;
   assetUrl: string | null;
+  /** Links this image/qr-logo placement back to the Asset row (see src/lib/uploads/saveUpload.ts)
+   *  that tracks the original upload independent of whatever assetUrl currently points at — same
+   *  precedent as qrAssetId below. Null for objects placed before this field existed, or whose
+   *  asset predates the Asset table; both keep working exactly like today since assetUrl is still
+   *  fully authoritative for rendering, this is only for traceability back to the original file. */
+  assetId?: string | null;
   content: string | null;
   fontFamily: string | null;
   fontSize: number | null;

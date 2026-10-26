@@ -50,6 +50,10 @@ export type CartItem = {
     includeNotes: string;
     avoidNotes: string;
     uploadedFileUrl?: string;
+    /** The Asset row (src/lib/uploads/saveUpload.ts) tracking the uploaded file above — needed so
+     *  this brief's file survives a "Get a quote" handoff with a real traceable reference instead
+     *  of just a bare URL. Undefined for briefs submitted before this field existed. */
+    uploadedAssetId?: string;
   };
   previewImageUrl?: string;
 };
@@ -74,6 +78,32 @@ const STORAGE_KEY = "mi-cart";
 // on mount to prefill the product description — a plain sessionStorage
 // handoff rather than routing state, so it survives the full navigation.
 export const QUOTE_PREFILL_KEY = "mi-quote-prefill";
+
+/** One structured line per cart item, forwarded (not discarded) when a cart needs a quote —
+ *  previously handleGetQuote collapsed the entire cart, including an already-frozen Studio design
+ *  or a Mystery/Designer's Choice brief with its uploaded file, into a single plain-text summary
+ *  string, silently losing everything structured. Field set is deliberately just "everything
+ *  already on CartItem," so every quote-eligible cart item — CUSTOM, BLANK, or MAPLE_DESIGNER —
+ *  can be represented without inventing new shapes per customizationType. */
+export type QuoteCartHandoff = {
+  cartItemId: string;
+  name: string;
+  quantity: number;
+  categorySlug: string;
+  categoryName?: string;
+  colourName?: string;
+  sizeBreakdown?: { size: string; qty: number }[];
+  customizationType?: CartItem["customizationType"];
+  designProjectId?: string;
+  designFrozenRevision?: number;
+  assistanceBrief?: CartItem["assistanceBrief"];
+  productSlug?: string;
+  subcategorySlug?: string;
+};
+
+// Structured counterpart to QUOTE_PREFILL_KEY, written alongside it (not instead of it — the
+// wizard still wants a human-readable text summary regardless of whether structure is available).
+export const QUOTE_CART_LINES_KEY = "mi-quote-cart-lines";
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);

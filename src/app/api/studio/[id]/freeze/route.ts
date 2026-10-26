@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createStudioClient } from "@/lib/studio/supabaseClient";
 import { STUDIO_SESSION_COOKIE } from "@/lib/studio/session";
-import { loadDesignProjectRecord } from "@/lib/studio/loadProjectRecord";
+import { freezeDesignProject } from "@/lib/studio/freeze";
+import { triggerDesignExport } from "@/lib/studio/exportDesign";
 
 /** Called once, at "Approve & add to cart" — turns the live, editable DesignProject into an
  *  immutable snapshot that a cart line / order can safely reference. Idempotent: calling this
@@ -15,47 +16,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   if (!sessionToken) return NextResponse.json({ error: "Missing Studio session." }, { status: 400 });
   const supabase = createStudioClient(sessionToken);
 
-  const { data: current, error: currentError } = await supabase
-    .from("DesignProject")
-    .select("frozenAt, designSnapshot, frozenRevision")
-    .eq("id", id)
-    .maybeSingle();
-  if (currentError) {
-    console.error("[studio] freeze status check failed:", currentError);
-    return NextResponse.json({ error: "Couldn't finalize your design." }, { status: 502 });
-  }
-  if (!current) return NextResponse.json({ error: "Design not found." }, { status: 404 });
+  const result = await freezeDesignProject(supabase, id);
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
 
-  if (current.frozenAt) {
-    return NextResponse.json({
-      frozenRevision: current.frozenRevision,
-      designSnapshot: current.designSnapshot,
-    });
-  }
+  // Fire-and-forget — the customer's freeze/add-to-cart response must never wait on production
+  // file generation. Safe to call repeatedly (triggerDesignExport no-ops once already READY).
+  triggerDesignExport(supabase, id).catch((err) => console.error("[studio] export trigger failed:", err));
 
-  const { record, error } = await loadDesignProjectRecord(supabase, id);
-  if (error) return NextResponse.json({ error: "Couldn't finalize your design." }, { status: 502 });
-  if (!record) return NextResponse.json({ error: "Design not found." }, { status: 404 });
-  if (!record.sides.some((s) => s.objects.length > 0)) {
-    return NextResponse.json({ error: "Add at least one design element before approving." }, { status: 422 });
-  }
-
-  const frozenAt = new Date().toISOString();
-  const { error: updateError } = await supabase
-    .from("DesignProject")
-    .update({
-      frozenAt,
-      designSnapshot: record,
-      frozenRevision: record.revision,
-      status: "ordered",
-      updatedAt: frozenAt,
-    })
-    .eq("id", id);
-
-  if (updateError) {
-    console.error("[studio] freeze update failed:", updateError);
-    return NextResponse.json({ error: "Couldn't finalize your design." }, { status: 502 });
-  }
-
-  return NextResponse.json({ frozenRevision: record.revision, designSnapshot: record });
+  return NextResponse.json({ frozenRevision: result.frozenRevision, designSnapshot: result.designSnapshot });
 }
