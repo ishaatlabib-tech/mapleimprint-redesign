@@ -21,7 +21,10 @@ const SOURCE_LABEL: Record<ScoredInquiry["source"], string> = {
   appointment: "appointment request",
 };
 
-export function customerConfirmationEmail(inquiry: ScoredInquiry): { subject: string; html: string; text: string } {
+export function customerConfirmationEmail(
+  inquiry: ScoredInquiry,
+  opts: { statusUrl?: string } = {},
+): { subject: string; html: string; text: string } {
   const firstName = inquiry.name.split(" ")[0] || inquiry.name;
   const lines = summaryLines(inquiry);
   const subject = "We've received your request!";
@@ -34,6 +37,7 @@ export function customerConfirmationEmail(inquiry: ScoredInquiry): { subject: st
     "",
     ...lines.map((l) => `${l.label}: ${l.value}`),
     "",
+    ...(opts.statusUrl ? [`View your request: ${opts.statusUrl}`, ""] : []),
     `${BUSINESS.name}`,
     BUSINESS.phoneDisplay,
     SITE_URL,
@@ -54,6 +58,7 @@ export function customerConfirmationEmail(inquiry: ScoredInquiry): { subject: st
           )
           .join("")}
       </table>
+      ${opts.statusUrl ? `<p><a href="${opts.statusUrl}">View your request &amp; files</a></p>` : ""}
       <p style="margin-top:24px;">
         ${escapeHtml(BUSINESS.name)}<br/>
         ${escapeHtml(BUSINESS.phoneDisplay)}<br/>
@@ -78,6 +83,7 @@ export function orderConfirmationEmail(order: OrderConfirmationInput): { subject
   const firstName = order.contactName.split(" ")[0] || order.contactName;
   const total = `$${(order.totalCents / 100).toFixed(2)}`;
   const subject = `Order confirmed — ${order.reference}`;
+  const confirmationUrl = `${SITE_URL}/order/${order.reference}/confirmation`;
 
   const itemLines = order.lines.map((l) => `${l.productName}${l.colourName ? ` (${l.colourName})` : ""} × ${l.quantity}`);
 
@@ -94,6 +100,8 @@ export function orderConfirmationEmail(order: OrderConfirmationInput): { subject
     "",
     "What happens next: your design(s) move into production preparation, then printing, then shipping.",
     "We'll be in touch if we need anything from you.",
+    "",
+    `View your order & files: ${confirmationUrl}`,
     "",
     `${BUSINESS.name}`,
     BUSINESS.phoneDisplay,
@@ -112,12 +120,57 @@ export function orderConfirmationEmail(order: OrderConfirmationInput): { subject
       </table>
       <p>What happens next: your design(s) move into production preparation, then printing, then shipping. We'll
         be in touch if we need anything from you.</p>
+      <p><a href="${confirmationUrl}">View your order &amp; files</a></p>
       <p style="margin-top:24px;">
         ${escapeHtml(BUSINESS.name)}<br/>
         ${escapeHtml(BUSINESS.phoneDisplay)}<br/>
         <a href="${SITE_URL}">${SITE_URL}</a><br/>
         ${escapeHtml(BUSINESS_ADDRESS_ONE_LINE)}
       </p>
+    </div>
+  `;
+
+  return { subject, html, text };
+}
+
+interface AdminOrderPaidInput {
+  reference: string;
+  contactName: string;
+  contactEmail: string;
+  totalCents: number;
+  lines: { productName: string; quantity: number; colourName: string | null }[];
+}
+
+/** Staff-facing counterpart to orderConfirmationEmail above — until now, a paid order notified
+ *  *only* the customer; staff had no signal a new order existed at all short of checking Square
+ *  directly. Links to the new /admin/orders/[reference] detail page. */
+export function adminOrderPaidEmail(order: AdminOrderPaidInput): { subject: string; html: string; text: string } {
+  const total = `$${(order.totalCents / 100).toFixed(2)}`;
+  const subject = `New paid order — ${order.reference} (${order.contactName})`;
+  const adminUrl = `${SITE_URL}/admin/orders/${order.reference}`;
+  const itemLines = order.lines.map((l) => `${l.productName}${l.colourName ? ` (${l.colourName})` : ""} × ${l.quantity}`);
+
+  const text = [
+    `New paid order: ${order.reference}`,
+    `Customer: ${order.contactName} (${order.contactEmail})`,
+    `Total: ${total}`,
+    "",
+    "Items:",
+    ...itemLines.map((l) => `- ${l}`),
+    "",
+    `Manage: ${adminUrl}`,
+  ].join("\n");
+
+  const html = `
+    <div style="font-family:Arial,sans-serif;color:#1a1a1a;max-width:560px;margin:0 auto;">
+      <h2 style="margin-bottom:12px;">New paid order</h2>
+      <table cellpadding="6" cellspacing="0" style="width:100%;">
+        <tr><td style="font-weight:600;white-space:nowrap;">Reference</td><td>${escapeHtml(order.reference)}</td></tr>
+        <tr><td style="font-weight:600;white-space:nowrap;">Customer</td><td>${escapeHtml(order.contactName)} (${escapeHtml(order.contactEmail)})</td></tr>
+        <tr><td style="font-weight:600;white-space:nowrap;">Total</td><td>${escapeHtml(total)}</td></tr>
+        <tr><td style="font-weight:600;white-space:nowrap;vertical-align:top;">Items</td><td>${itemLines.map(escapeHtml).join("<br/>")}</td></tr>
+      </table>
+      <p style="margin-top:16px;"><a href="${adminUrl}">View order & files</a></p>
     </div>
   `;
 
@@ -144,6 +197,9 @@ export function ownerNotificationEmail(inquiry: ScoredInquiry): { subject: strin
     ...(inquiry.fileNames && inquiry.fileNames.length > 0
       ? [{ label: "Attachments", value: inquiry.fileNames.join(", ") }]
       : []),
+    // Only quotes have an admin detail page today (contact/appointment inquiries have no
+    // QuoteRequest row behind them) — see src/app/(admin)/admin/quotes/[reference]/page.tsx.
+    ...(inquiry.source === "quote" ? [{ label: "Manage", value: `${SITE_URL}/admin/quotes/${inquiry.reference}` }] : []),
   ];
 
   const text = rows.map((r) => `${r.label}: ${r.value}`).join("\n");

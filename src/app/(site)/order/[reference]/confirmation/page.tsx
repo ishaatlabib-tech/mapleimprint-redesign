@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Check, SpinnerGap } from "@phosphor-icons/react/dist/ssr";
 import { Container } from "@/components/ui/Container";
 import { createAdminClient } from "@/lib/server/supabaseAdmin";
+import { buildFileInventory } from "@/lib/admin/fileInventory";
 
 interface OrderLine {
   productName: string;
@@ -42,8 +43,13 @@ export default async function OrderConfirmationPage({ params }: { params: Promis
 
   const { data: lines } = await supabaseAdmin
     .from("MapleOrderLine")
-    .select("productName, quantity, colourName, customizationType")
+    .select("productName, quantity, colourName, customizationType, designProjectId, designSnapshot")
     .eq("orderId", order.id);
+
+  // Customer-facing: only the composited preview image and the customer's own uploaded original —
+  // never the 300dpi production files (print-shop use only), same split as /quote/[reference]/status.
+  const inventory = order.status === "PAID" ? await buildFileInventory(supabaseAdmin, lines ?? []) : [];
+  const linesWithFiles = inventory.filter((line) => line.preview.length > 0 || line.assets.length > 0);
 
   const firstName = order.contactName.split(" ")[0] || order.contactName;
   const address = order.shippingAddress as { city?: string; province?: string } | null;
@@ -101,6 +107,40 @@ export default async function OrderConfirmationPage({ params }: { params: Promis
           <span>${(order.totalCents / 100).toFixed(2)}</span>
         </div>
       </div>
+
+      {linesWithFiles.length > 0 && (
+        <div className="mt-8 rounded-[24px] bg-white p-6 text-left">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted">Your files</p>
+          <div className="mt-3 space-y-4">
+            {linesWithFiles.map((line) => (
+              <div key={line.lineIndex}>
+                <p className="text-sm font-semibold text-ink-900">{line.productName}</p>
+                {line.preview.length > 0 && (
+                  <ul className="mt-2 flex flex-wrap gap-3">
+                    {line.preview.map((p) => (
+                      <li key={p.sideType}>
+                        {/* eslint-disable-next-line @next/next/no-img-element -- external Supabase Storage URL */}
+                        <img src={p.url} alt={`${p.sideType} preview`} className="h-24 w-24 rounded-xl object-cover" />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {line.assets.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {line.assets.map((a) => (
+                      <li key={a.url}>
+                        <a href={a.url} target="_blank" rel="noreferrer" className="text-sm text-ink-900 underline-offset-2 hover:underline">
+                          {a.originalFileName}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 rounded-[24px] bg-canvas p-6 text-left">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted">What happens next</p>

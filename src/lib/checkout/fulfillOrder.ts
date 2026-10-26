@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendEmail } from "@/lib/automation/email/resend";
-import { orderConfirmationEmail } from "@/lib/automation/email/templates";
+import { orderConfirmationEmail, adminOrderPaidEmail } from "@/lib/automation/email/templates";
 import { triggerDesignExport } from "@/lib/studio/exportDesign";
 
 /**
@@ -49,6 +49,26 @@ export async function markOrderPaidAndNotify(
 
   await sendEmail({ to: transitioned.contactEmail, subject, html, text });
   await supabaseAdmin.from("MapleOrder").update({ emailSentAt: new Date().toISOString() }).eq("id", orderId);
+
+  // Staff-facing counterpart — until now a paid order notified *only* the customer. Own try/catch,
+  // same isolation style as the n8n-webhook block below: a Resend outage or missing
+  // OWNER_NOTIFICATION_EMAIL must never affect the PAID transition or the customer's own email,
+  // both of which have already succeeded by this point.
+  const ownerEmail = process.env.OWNER_NOTIFICATION_EMAIL;
+  if (ownerEmail) {
+    try {
+      const adminEmail = adminOrderPaidEmail({
+        reference: transitioned.reference,
+        contactName: transitioned.contactName,
+        contactEmail: transitioned.contactEmail,
+        totalCents: transitioned.totalCents,
+        lines: (lines ?? []).map((l) => ({ productName: l.productName, quantity: l.quantity, colourName: l.colourName })),
+      });
+      await sendEmail({ to: ownerEmail, ...adminEmail });
+    } catch (err) {
+      console.error("[checkout] admin paid-order notification failed:", err);
+    }
+  }
 
   // Production file export (300dpi PNG + SVG where vector-eligible) for every CUSTOM line —
   // customer's payment confirmation must never wait on this, so each line is triggered

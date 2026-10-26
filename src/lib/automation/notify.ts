@@ -1,6 +1,7 @@
 import { sendEmail } from "./email/resend";
 import { customerConfirmationEmail, ownerNotificationEmail } from "./email/templates";
 import { sendTelegramMessage } from "./telegram";
+import { SITE_URL } from "@/lib/constants";
 import type { ScoredInquiry } from "./types";
 
 /**
@@ -14,7 +15,10 @@ export async function notifyInquiry(inquiry: ScoredInquiry): Promise<void> {
 
   await Promise.allSettled([
     (async () => {
-      const { subject, html, text } = customerConfirmationEmail(inquiry);
+      // Only quotes get a status page (/quote/[reference]/status) today — contact/appointment
+      // inquiries have no QuoteRequest row or files behind them to show.
+      const statusUrl = inquiry.source === "quote" ? `${SITE_URL}/quote/${inquiry.reference}/status` : undefined;
+      const { subject, html, text } = customerConfirmationEmail(inquiry, { statusUrl });
       await sendEmail({ to: inquiry.email, subject, html, text });
     })(),
     (async () => {

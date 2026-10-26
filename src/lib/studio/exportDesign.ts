@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { renderDesignForExport } from "./renderDesignForExport";
 import { renderDesignToSvg, isVectorEligible } from "./renderDesignToSvg";
+import { renderPreview } from "./renderPreview";
 import { DESIGN_UPLOADS_BUCKET } from "./supabaseClient";
 import { createAdminClient } from "@/lib/server/supabaseAdmin";
 import type { DesignProjectRecord } from "./types";
@@ -11,6 +12,10 @@ export interface ExportedSideFiles {
   pngUrl: string;
   svgUrl: string | null;
   pngDpi: number;
+}
+
+export interface PreviewSideFile {
+  url: string;
 }
 
 /** Orchestrates "for a frozen designSnapshot, produce a 300dpi transparent PNG (+ true SVG where
@@ -61,6 +66,7 @@ export async function triggerDesignExport(
   try {
     const record = project.designSnapshot as DesignProjectRecord;
     const exportedFiles: Record<string, ExportedSideFiles> = {};
+    const previewFiles: Record<string, PreviewSideFile> = {};
 
     for (const side of record.sides) {
       if (side.objects.length === 0) continue;
@@ -87,11 +93,33 @@ export async function triggerDesignExport(
       }
 
       exportedFiles[side.sideType] = { pngUrl: pngUrlData.publicUrl, svgUrl, pngDpi: EXPORT_DPI };
+
+      // Web-sized, non-transparent preview render — separate category from the production file
+      // above (see migration 006), never blocks production export on failure: a preview render
+      // issue shouldn't flip the whole export to FAILED when the actual print-ready file is fine.
+      try {
+        const previewBuffer = await renderPreview(side.objects, side.printAreaWidth, side.printAreaHeight);
+        const previewPath = `preview-exports/${designProjectId}/${side.sideType}.png`;
+        const { error: previewError } = await storageClient.storage
+          .from(DESIGN_UPLOADS_BUCKET)
+          .upload(previewPath, previewBuffer, { contentType: "image/png", upsert: true });
+        if (previewError) throw previewError;
+        const { data: previewUrlData } = storageClient.storage.from(DESIGN_UPLOADS_BUCKET).getPublicUrl(previewPath);
+        previewFiles[side.sideType] = { url: previewUrlData.publicUrl };
+      } catch (previewErr) {
+        console.error("[studio] preview render failed for", designProjectId, side.sideType, previewErr);
+      }
     }
 
     await supabase
       .from("DesignProject")
-      .update({ exportStatus: "READY", exportedFiles, exportedAt: new Date().toISOString(), exportError: null })
+      .update({
+        exportStatus: "READY",
+        exportedFiles,
+        previewFiles,
+        exportedAt: new Date().toISOString(),
+        exportError: null,
+      })
       .eq("id", designProjectId);
   } catch (err) {
     console.error("[studio] export failed for", designProjectId, err);
