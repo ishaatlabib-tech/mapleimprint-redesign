@@ -17,7 +17,7 @@ import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment, ContactShadows } from "@react-three/drei";
 import * as THREE from "three";
 import type { DesignObjectRecord } from "@/lib/studio/types";
-import type { DrinkwareKind } from "@/lib/houseProducts/pricing/drinkware";
+import type { DrinkwareVesselKind } from "@/lib/studio/drinkwareCustomization";
 import { renderDesignToCanvas } from "@/lib/studio/renderDesignToCanvas";
 import { PRINT_AREAS } from "@/lib/studio/printAreas";
 
@@ -60,12 +60,21 @@ interface VesselParams {
    *  screw cap — set on the cap material only when true, so bottle caps stay fully opaque. */
   capTransparent?: boolean;
   capOpacity?: number;
+  /** A thin straw poking out of the lid (skinny tumblers) — rendered as a slim cylinder offset
+   *  from centre, so the silhouette reads as a straw tumbler rather than a plain cup. */
+  hasStraw?: boolean;
 }
 
-const VESSEL_PARAMS: Record<DrinkwareKind, VesselParams> = {
+const VESSEL_PARAMS: Record<DrinkwareVesselKind, VesselParams> = {
   mug: {
     radiusTop: 1.15, radiusBottom: 1.15, height: 2.3, hasHandle: true, hasCap: false,
     bodyColor: "#FAFAF7", metalness: 0.04, roughness: 0.35, openTop: true,
+  },
+  "travel-mug": {
+    // Tapered insulated travel mug — narrower at the base to fit a cup holder, solid flip lid
+    // (opaque dark plastic, not the clear push-on lid a tumbler has).
+    radiusTop: 0.95, radiusBottom: 0.74, height: 2.7, hasHandle: false, hasCap: true,
+    bodyColor: "#C9CDD1", capColor: "#2F2F33", metalness: 0.7, roughness: 0.32, openTop: false,
   },
   tumbler: {
     // Insulated steel tumbler — tapers slightly narrower at the base, brushed-metal finish, clear
@@ -74,15 +83,22 @@ const VESSEL_PARAMS: Record<DrinkwareKind, VesselParams> = {
     bodyColor: "#C9CDD1", capColor: "#E7E9EA", metalness: 0.75, roughness: 0.3, openTop: false,
     capTransparent: true, capOpacity: 0.55,
   },
-  "water-bottle": {
-    // Narrow insulated bottle body with a distinct narrower neck + screw cap.
-    radiusTop: 0.72, radiusBottom: 0.72, height: 3.1, hasHandle: false, hasCap: true, neckRadius: 0.3,
-    bodyColor: "#D7DADD", capColor: "#3A3A3E", metalness: 0.55, roughness: 0.3, openTop: false,
+  "skinny-tumbler": {
+    // Tall, slim tumbler with a clear push-on lid and a straw — the silhouette that actually tells
+    // a customer "this is a skinny tumbler, not a regular one."
+    radiusTop: 0.6, radiusBottom: 0.5, height: 3.8, hasHandle: false, hasCap: true,
+    bodyColor: "#C9CDD1", capColor: "#E7E9EA", metalness: 0.72, roughness: 0.3, openTop: false,
+    capTransparent: true, capOpacity: 0.55, hasStraw: true,
   },
-  "pint-glass": {
+  glass: {
     // Classic shaker pint — wider at the rim, narrower at the base, glass material, open top.
     radiusTop: 1.05, radiusBottom: 0.78, height: 2.6, hasHandle: false, hasCap: false,
     bodyColor: "#EAF3F5", metalness: 0, roughness: 0.05, transparent: true, opacity: 0.4, openTop: true,
+  },
+  bottle: {
+    // Narrow insulated bottle body with a distinct narrower neck + screw cap.
+    radiusTop: 0.72, radiusBottom: 0.72, height: 3.1, hasHandle: false, hasCap: true, neckRadius: 0.3,
+    bodyColor: "#D7DADD", capColor: "#3A3A3E", metalness: 0.55, roughness: 0.3, openTop: false,
   },
 };
 
@@ -98,7 +114,7 @@ function designGeometryFor(hasHandle: boolean) {
   return { start, arc, center };
 }
 
-function VesselModel({ kind, texture }: { kind: DrinkwareKind; texture: THREE.CanvasTexture | null }) {
+function VesselModel({ kind, texture }: { kind: DrinkwareVesselKind; texture: THREE.CanvasTexture | null }) {
   const p = VESSEL_PARAMS[kind];
   const { start, arc } = designGeometryFor(p.hasHandle);
   const decalRadius = Math.max(p.radiusTop, p.radiusBottom) + 0.006;
@@ -182,6 +198,13 @@ function VesselModel({ kind, texture }: { kind: DrinkwareKind; texture: THREE.Ca
           </mesh>
         </group>
       )}
+      {/* Straw — a slim cylinder poking up out of the lid, offset from centre (skinny tumblers) */}
+      {p.hasStraw && (
+        <mesh position={[p.radiusTop * 0.4, p.height / 2 + 0.75, 0]} castShadow>
+          <cylinderGeometry args={[0.055, 0.055, 1.5, 16]} />
+          <meshStandardMaterial color="#E7E9EA" roughness={0.25} metalness={0.1} transparent opacity={0.85} />
+        </mesh>
+      )}
       {/* Bottom */}
       <mesh position={[0, -p.height / 2, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <circleGeometry args={[p.radiusBottom, 64]} />
@@ -223,7 +246,7 @@ function LoadingSpinnerOverlay() {
  *  snapshot. `kind` picks which vessel silhouette to render — defaults to "mug" for any caller
  *  that predates the multi-vessel fix, but every real caller now passes the project's actual
  *  drinkware kind (see StudioClient). */
-export function Mug3DPreview({ objects, kind = "mug" }: { objects: DesignObjectRecord[]; kind?: DrinkwareKind }) {
+export function Mug3DPreview({ objects, kind = "mug" }: { objects: DesignObjectRecord[]; kind?: DrinkwareVesselKind }) {
   const [texture, setTexture] = useState<THREE.CanvasTexture | null>(null);
   const [loading, setLoading] = useState(true);
   const printArea = PRINT_AREAS["mug-wrap"];

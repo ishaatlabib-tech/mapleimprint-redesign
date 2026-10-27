@@ -7,7 +7,8 @@ import { cn } from "@/lib/cn";
 import { backgroundUrlFor, printAreaOverrideFor, PRINT_AREAS } from "@/lib/studio/printAreas";
 import { groupLocationsByView } from "@/lib/studio/garmentViews";
 import { decorationProfileFor, type DecorationLocation } from "@/lib/studio/productDecorationProfile";
-import { FAMILIES_WITHOUT_3D, drinkwareKindFor, accessoryKindFor } from "@/lib/studio/preview3d";
+import { FAMILIES_WITHOUT_3D, accessoryKindFor } from "@/lib/studio/preview3d";
+import type { DrinkwareVesselKind } from "@/lib/studio/drinkwareCustomization";
 import type { DesignObjectRecord, DesignProjectRecord, DesignSideRecord, DesignSideType } from "@/lib/studio/types";
 
 const CanvasStage = dynamic(() => import("@/components/studio/CanvasStage").then((m) => m.CanvasStage), {
@@ -56,6 +57,7 @@ export function PreviewMode({
   categorySlug,
   subcategorySlug,
   productSlug,
+  vesselKind,
 }: {
   openSides: DesignSideType[];
   sides: Partial<Record<DesignSideType, DesignObjectRecord[]>>;
@@ -77,6 +79,9 @@ export function PreviewMode({
    *  bespoke accessory shapes (tote bag/pen/notebook/phone stand), since pens and notebooks share
    *  the same subcategorySlug "stationery" and can't be told apart by that alone. */
   productSlug: string;
+  /** Resolved drinkware vessel (shared with StudioClient/ReviewPanel) — picks the per-vessel 2D
+   *  illustration and 3D silhouette. Undefined for non-drinkware. */
+  vesselKind?: DrinkwareVesselKind;
 }) {
   const labelFor = (id: DesignSideType) => profile.find((l) => l.id === id)?.label ?? id;
   const viewGroups = groupLocationsByView(openSides, profile);
@@ -85,7 +90,7 @@ export function PreviewMode({
     locations.length === 1 ? labelFor(locations[0]) : `${labelFor(locations[0])} + ${locations.slice(1).map(labelFor).join(", ")}`;
   const primaryLocation = activeGroup?.locations[0];
   const primaryProfile = primaryLocation ? profile.find((l) => l.id === primaryLocation) : null;
-  const mockupUrl = primaryProfile ? backgroundUrlFor(primaryProfile.viewType, mockupImages, colourName, primaryProfile.usesPlacementPreview) : null;
+  const mockupUrl = primaryProfile ? backgroundUrlFor(primaryProfile.viewType, mockupImages, colourName, primaryProfile.usesPlacementPreview, vesselKind) : null;
 
   const hasBackPhoto = Boolean(mockupImages.back);
   const family = decorationProfileFor(categorySlug, subcategorySlug, hasBackPhoto).family;
@@ -147,7 +152,7 @@ export function PreviewMode({
         <div className="min-h-0 w-full flex-1">
           {activeGroup && viewMode === "3d" && canShow3D ? (
             family === "mug" ? (
-              <Mug3DPreview objects={sides[primaryLocation!] ?? []} kind={drinkwareKindFor(subcategorySlug)} />
+              <Mug3DPreview objects={sides[primaryLocation!] ?? []} kind={vesselKind ?? "mug"} />
             ) : (
               <Flat3DPreview
                 objects={sides[primaryLocation!] ?? []}

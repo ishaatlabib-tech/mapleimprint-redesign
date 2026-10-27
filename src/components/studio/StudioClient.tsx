@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion, useReducedMotion } from "framer-motion";
 import { Check, SpinnerGap, WarningCircle, X } from "@phosphor-icons/react/dist/ssr";
 import { cn } from "@/lib/cn";
-import { useCart } from "@/components/cart/CartProvider";
+import { useCart, QUOTE_PREFILL_KEY, QUOTE_CART_LINES_KEY, type QuoteCartHandoff } from "@/components/cart/CartProvider";
 import { ReviewPanel } from "@/components/studio/ReviewPanel";
 import { PreviewMode } from "@/components/studio/PreviewMode";
 import { PostCartConfirmation } from "@/components/studio/PostCartConfirmation";
@@ -26,7 +26,8 @@ import { GraphicsPanel } from "@/components/studio/panels/GraphicsPanel";
 import { DesignsPanel } from "@/components/studio/panels/DesignsPanel";
 import { MyStuffPanel } from "@/components/studio/panels/MyStuffPanel";
 import { decorationProfileFor } from "@/lib/studio/productDecorationProfile";
-import { FAMILIES_WITHOUT_3D, drinkwareKindFor, accessoryKindFor } from "@/lib/studio/preview3d";
+import { FAMILIES_WITHOUT_3D, accessoryKindFor } from "@/lib/studio/preview3d";
+import { drinkwareConfigFor } from "@/lib/studio/drinkwareCustomization";
 import { backgroundUrlFor, printAreaPixelBox, printAreaOverrideFor, printAreasOverlap, PRINT_AREAS } from "@/lib/studio/printAreas";
 import { viewGroupFor } from "@/lib/studio/garmentViews";
 import { resolveTemplateAssets, scaleTemplateObjects, type DesignTemplate } from "@/lib/studio/templates";
@@ -520,6 +521,19 @@ export function StudioClient({ projectId }: { projectId: string }) {
 
   const family = decorationProfile?.family ?? null;
   const can3D = Boolean(family && !FAMILIES_WITHOUT_3D.includes(family) && activeLocation);
+  // Drinkware vessel + quote routing (one resolver shared with the product pages). vesselKind picks
+  // the per-vessel 2D illustration and 3D silhouette; requiresQuote routes a finished design through
+  // Request a Quote rather than instant checkout (no automated drinkware print price — see plan).
+  const drinkwareConfig = project
+    ? drinkwareConfigFor({
+        slug: project.productSlug,
+        name: project.productName,
+        categorySlug: project.categorySlug,
+        subcategorySlug: project.subcategorySlug,
+      })
+    : null;
+  const vesselKind = drinkwareConfig?.vesselKind;
+  const requiresQuote = drinkwareConfig?.requiresQuote ?? false;
   // Banner's real dimensions vary per order (no fixed PRINT_AREAS entry to trust) — reuse the same
   // override lookup the 2D canvas already threads through for it, same reasoning as printAreaPixelBox.
   // "accessory" family (gifts-promo/packaging) reuses the generic "front"/"back" DesignSideType IDs
@@ -1424,6 +1438,36 @@ export function StudioClient({ projectId }: { projectId: string }) {
       const res = await fetch(`/api/studio/${projectId}/freeze`, { method: "POST" });
       const data = await res.json().catch(() => null);
       if (!res.ok) throw new Error(data?.error ?? "Couldn't save your approval.");
+
+      if (requiresQuote) {
+        // Drinkware has no automated print price — the frozen design routes to Request a Quote,
+        // carrying its designProjectId so /api/quote captures the snapshot + asset/production/
+        // preview files (the Phase 1/2 pipeline), rather than into the pay-checkout cart. The
+        // design is already saved and frozen server-side; this is just the handoff.
+        const line: QuoteCartHandoff = {
+          cartItemId: `studio-${project.id}`,
+          name: project.productName,
+          quantity: project.totalQuantity,
+          categorySlug: project.categorySlug,
+          categoryName: project.categorySlug,
+          subcategorySlug: project.subcategorySlug,
+          productSlug: project.productSlug,
+          colourName: project.colourName,
+          sizeBreakdown: project.sizeBreakdown,
+          customizationType: "CUSTOM",
+          designProjectId: project.id,
+          designFrozenRevision: data?.frozenRevision,
+        };
+        window.sessionStorage.setItem(
+          QUOTE_PREFILL_KEY,
+          `${project.productName} — custom printed, ${project.totalQuantity} units`,
+        );
+        window.sessionStorage.setItem(QUOTE_CART_LINES_KEY, JSON.stringify([line]));
+        setApproveState("success");
+        router.push("/contact?type=quote");
+        return;
+      }
+
       addItem(
         {
           id: `studio-${project.id}`,
@@ -1481,6 +1525,8 @@ export function StudioClient({ projectId }: { projectId: string }) {
         onBack={() => setMode("edit")}
         onApprove={handleApproveAndAddToCart}
         approveState={approveState}
+        vesselKind={vesselKind}
+        requiresQuote={requiresQuote}
       />
     );
   } else if (mode === "preview") {
@@ -1498,11 +1544,12 @@ export function StudioClient({ projectId }: { projectId: string }) {
         categorySlug={project.categorySlug}
         subcategorySlug={project.subcategorySlug}
         productSlug={project.productSlug}
+        vesselKind={vesselKind}
       />
     );
   } else {
     const mockupUrl = activeLocation
-      ? backgroundUrlFor(activeLocation.viewType, project.mockupImages, project.colourName, activeLocation.usesPlacementPreview)
+      ? backgroundUrlFor(activeLocation.viewType, project.mockupImages, project.colourName, activeLocation.usesPlacementPreview, vesselKind)
       : null;
     const cropTarget = cropTargetId ? activeObjects.find((o) => o.id === cropTargetId) ?? null : null;
 
@@ -1669,7 +1716,7 @@ export function StudioClient({ projectId }: { projectId: string }) {
                 // box shaped like neither of them.
                 <div className="h-full w-full">
                   {family === "mug" ? (
-                    <Mug3DPreview objects={activeObjects} kind={project ? drinkwareKindFor(project.subcategorySlug) : "mug"} />
+                    <Mug3DPreview objects={activeObjects} kind={vesselKind ?? "mug"} />
                   ) : (
                     <Flat3DPreview
                       objects={activeObjects}

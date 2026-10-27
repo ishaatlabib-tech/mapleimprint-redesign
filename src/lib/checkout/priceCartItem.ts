@@ -82,6 +82,20 @@ export async function priceCartItem(
     }
 
     const snapshot = project.designSnapshot as DesignProjectRecord;
+
+    // Drinkware has no automated print-pricing rule — a customized drinkware design is finalized
+    // through Request a Quote, not instant checkout (see the plan; its pricingSnapshot deliberately
+    // carries no print cost). This is a defensive guardrail: the Studio finish flow already routes
+    // drinkware to the quote handoff, so a drinkware CUSTOM line should never reach here — but if
+    // one somehow does, reject it to quote rather than charge a base-only price that omits printing.
+    if (snapshot.categorySlug === "drinkware") {
+      return {
+        ok: false,
+        cartItemId: item.id,
+        reason: "Custom drinkware is priced by quote — please submit it through Request a Quote so we can confirm printing.",
+      };
+    }
+
     const pricing = snapshot.pricingSnapshot;
     if (!pricing || snapshot.totalQuantity < 1) {
       return { ok: false, cartItemId: item.id, reason: "This design has no valid pricing." };

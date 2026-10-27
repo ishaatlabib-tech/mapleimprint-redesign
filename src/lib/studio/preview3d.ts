@@ -1,5 +1,4 @@
 import type { ProductFamily } from "@/lib/studio/productDecorationProfile";
-import type { DrinkwareKind } from "@/lib/houseProducts/pricing/drinkware";
 
 // Families that render on real garment photography (front/back are an actual photo, not a flat
 // schematic) — a rotatable 3D box/plane doesn't fit that mental model the way it does for a print
@@ -10,18 +9,9 @@ import type { DrinkwareKind } from "@/lib/houseProducts/pricing/drinkware";
 // surfaces agree on which families get a 3D toggle at all.
 export const FAMILIES_WITHOUT_3D: ProductFamily[] = ["tee", "hoodie", "joggers", "headwear"];
 
-// Every drinkware subcategory shares the "mug" family/print-area (see productDecorationProfile's
-// familyFor), but the 3D preview needs to know which actual vessel it's rendering — this mirrors
-// the same subcategorySlug set familyFor checks against, mapped onto DrinkwareConfigurator's
-// DrinkwareKind. Falls back to "mug" for anything unrecognized rather than guessing.
-export function drinkwareKindFor(subcategorySlug: string): DrinkwareKind {
-  switch (subcategorySlug) {
-    case "tumblers": return "tumbler";
-    case "bottles": return "water-bottle";
-    case "glassware": return "pint-glass";
-    default: return "mug";
-  }
-}
+// NOTE: the drinkware vessel for the 3D/2D preview is now resolved by drinkwareConfigFor() in
+// src/lib/studio/drinkwareCustomization.ts (a richer 6-vessel model incl. travel mug / skinny
+// tumbler), which replaced the old subcategory-only drinkwareKindFor helper that lived here.
 
 // Four "accessory" family products (gifts-promo/packaging) get a bespoke Flat3DPreview shape
 // instead of the generic flat card — everything else in that family (stickers, keychains,

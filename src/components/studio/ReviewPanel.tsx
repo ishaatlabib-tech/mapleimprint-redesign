@@ -9,7 +9,8 @@ import { EASE_PREMIUM } from "@/lib/motion";
 import { backgroundUrlFor, printAreaOverrideFor, PRINT_AREAS } from "@/lib/studio/printAreas";
 import { groupLocationsByView } from "@/lib/studio/garmentViews";
 import { decorationProfileFor, type DecorationLocation } from "@/lib/studio/productDecorationProfile";
-import { FAMILIES_WITHOUT_3D, drinkwareKindFor, accessoryKindFor } from "@/lib/studio/preview3d";
+import { FAMILIES_WITHOUT_3D, accessoryKindFor } from "@/lib/studio/preview3d";
+import type { DrinkwareVesselKind } from "@/lib/studio/drinkwareCustomization";
 import type { DesignObjectRecord, DesignProjectRecord, DesignSideType } from "@/lib/studio/types";
 
 const CanvasStage = dynamic(() => import("@/components/studio/CanvasStage").then((m) => m.CanvasStage), {
@@ -56,6 +57,8 @@ export function ReviewPanel({
   onBack,
   onApprove,
   approveState,
+  vesselKind,
+  requiresQuote = false,
 }: {
   project: DesignProjectRecord;
   sides: Partial<Record<DesignSideType, DesignObjectRecord[]>>;
@@ -64,6 +67,10 @@ export function ReviewPanel({
   onBack: () => void;
   onApprove: () => void;
   approveState: "idle" | "adding" | "success" | "error";
+  vesselKind?: DrinkwareVesselKind;
+  /** Drinkware: finished design goes to Request a Quote rather than the pay cart (no automated
+   *  print price). Only changes button/wording here; the actual routing lives in StudioClient. */
+  requiresQuote?: boolean;
 }) {
   const availableSides = project.sides.map((s) => s.sideType);
   const hasArt = (side: DesignSideType) => (sides[side]?.length ?? 0) > 0;
@@ -71,7 +78,7 @@ export function ReviewPanel({
   const mockupFor = (side: DesignSideType) => {
     const loc = profile.find((l) => l.id === side);
     if (!loc) return null;
-    return backgroundUrlFor(loc.viewType, project.mockupImages, project.colourName, loc.usesPlacementPreview);
+    return backgroundUrlFor(loc.viewType, project.mockupImages, project.colourName, loc.usesPlacementPreview, vesselKind);
   };
 
   // Same "can this family show a rotatable 3D preview" rule Studio's own canvas uses (see
@@ -173,7 +180,7 @@ export function ReviewPanel({
                   {viewMode === "3d" && canShow3D ? (
                     <div className="mx-auto aspect-[4/5] w-full max-w-[420px] overflow-hidden rounded-3xl bg-white">
                       {family === "mug" ? (
-                        <Mug3DPreview objects={sides[primary] ?? []} kind={drinkwareKindFor(project.subcategorySlug)} />
+                        <Mug3DPreview objects={sides[primary] ?? []} kind={vesselKind ?? "mug"} />
                       ) : (
                         <Flat3DPreview
                           objects={sides[primary] ?? []}
@@ -295,7 +302,7 @@ export function ReviewPanel({
                     transition={{ duration: 0.18, ease: EASE_PREMIUM }}
                     className="flex items-center gap-2"
                   >
-                    <Check className="size-4" weight="bold" /> Added to Cart
+                    <Check className="size-4" weight="bold" /> {requiresQuote ? "Design saved" : "Added to Cart"}
                   </motion.span>
                 ) : (
                   <motion.span
@@ -305,7 +312,7 @@ export function ReviewPanel({
                     exit={{ opacity: 0 }}
                     transition={{ duration: 0.18, ease: EASE_PREMIUM }}
                   >
-                    Approve &amp; add to cart
+                    {requiresQuote ? "Approve & Request a Quote" : "Approve & add to cart"}
                   </motion.span>
                 )}
               </AnimatePresence>
@@ -313,7 +320,9 @@ export function ReviewPanel({
 
             {approveState === "error" && (
               <div className="rounded-2xl bg-crimson/10 p-4 text-sm text-crimson">
-                <p className="font-semibold">We couldn&apos;t add your design to the cart.</p>
+                <p className="font-semibold">
+                  {requiresQuote ? "We couldn't submit your design." : "We couldn't add your design to the cart."}
+                </p>
                 <p className="mt-1 text-xs text-crimson/80">
                   Your design is safe — nothing was lost. Please try again.
                 </p>

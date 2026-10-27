@@ -1,5 +1,7 @@
 import type { DesignSideType } from "./types";
 import type { LocationViewType } from "./productDecorationProfile";
+import type { DrinkwareVesselKind } from "./drinkwareCustomization";
+import { drinkwareWrapIllustrationSvg } from "./drinkwareIllustrations";
 
 // MVP print-area template: one representative geometry per location, applied uniformly rather
 // than per-product-per-size. This is a deliberate simplification, not a real registered
@@ -402,11 +404,16 @@ export function backgroundUrlFor(
   mockupImages: Partial<Record<DesignSideType, string>>,
   colourName: string,
   usesPlacementPreview: boolean,
+  /** For drinkware (mug-wrap-flat): which vessel to draw, so a tumbler/bottle/glass each get their
+   *  own recognizable illustration instead of the generic "Mug Wrap" card. Resolved by
+   *  drinkwareConfigFor() at the call site; omit for every non-drinkware location. */
+  vesselKind?: DrinkwareVesselKind,
 ): string | null {
   const kind = backgroundKindFor(viewType);
   if (kind === "inner-neck-schematic") return innerNeckSchematicSvg(colourName);
   if (kind === "sleeve-left-schematic") return sleeveSchematicSvg("left", colourName);
   if (kind === "sleeve-right-schematic") return sleeveSchematicSvg("right", colourName);
+  if (kind === "mug-wrap-flat" && vesselKind) return drinkwareWrapIllustrationSvg(vesselKind);
   switch (kind) {
     case "card-front-flat":
       return printPieceSchematicSvg("Business Card — Front");

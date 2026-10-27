@@ -2,9 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Minus, Plus } from "@phosphor-icons/react/dist/ssr";
+import { Check, Minus, Plus, SpinnerGap } from "@phosphor-icons/react/dist/ssr";
 import { cn } from "@/lib/cn";
-import { useCart, QUOTE_PREFILL_KEY } from "@/components/cart/CartProvider";
+import {
+  useCart,
+  QUOTE_PREFILL_KEY,
+  QUOTE_CART_LINES_KEY,
+  type QuoteCartHandoff,
+} from "@/components/cart/CartProvider";
 import { formatUnitPrice } from "@/lib/pricing/formatUnitPrice";
 import {
   bundleCartTiers,
@@ -13,6 +18,8 @@ import {
   bundleUnitLabel,
   bundleUnitPrice,
 } from "@/lib/houseProducts/pricing/bundles";
+import { getOrCreateClientSessionToken } from "@/lib/studio/session";
+import { drinkwareConfigFor } from "@/lib/studio/drinkwareCustomization";
 import type { CatalogueProduct } from "@/lib/products";
 
 const MONEY = new Intl.NumberFormat("en-CA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -42,6 +49,11 @@ export function BundleConfigurator({
   const qty = Math.max(minBundles, Math.floor(Number(qtyText)) || minBundles);
   const setQty = (n: number) => setQtyText(String(Math.max(minBundles, n)));
   const [added, setAdded] = useState(false);
+  const [startingStudio, setStartingStudio] = useState(false);
+  const [studioError, setStudioError] = useState<string | null>(null);
+  // Drinkware bundle products (Joto) are customizable — they get "Customize" + "Request Custom
+  // Quote" alongside the blank "Add to cart". Non-drinkware bundles keep the existing two actions.
+  const drinkwareCfg = drinkwareConfigFor(product);
 
   // Show the chosen option's own photos when it has any (colours/finishes); size options have none,
   // so the gallery keeps showing every photo rather than a misleading "not available" notice.
@@ -97,6 +109,76 @@ export function BundleConfigurator({
       total !== null ? `, ${money(total)} CAD` : ""
     }`;
     window.sessionStorage.setItem(QUOTE_PREFILL_KEY, summary);
+    router.push("/contact?type=quote");
+  }
+
+  // Total individual products across the selected packs — the quantity the design applies to and
+  // the figure staff need to see ("2 packs of 6 = 12 mugs"), not the pack count.
+  const totalItems = entry.sellUnit === "unit" ? qty : qty * entry.itemsPerBundle;
+  // Per-individual-item blank base price, for the design project's pricingSnapshot. Printing is
+  // kept at zero here (base vs print stay separate) — drinkware has no automated print price, so
+  // the finished design routes to a quote where Maple confirms the printing cost.
+  const perItemBase = unitPrice !== null ? Math.round((unitPrice / (entry.sellUnit === "unit" ? 1 : entry.itemsPerBundle)) * 100) / 100 : 0;
+
+  async function handleDesign() {
+    if (!entry || !drinkwareCfg || startingStudio) return;
+    setStartingStudio(true);
+    setStudioError(null);
+    try {
+      // Ensures the mi-session cookie exists before /api/studio reads it from the request.
+      getOrCreateClientSessionToken();
+      const res = await fetch("/api/studio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          productSlug: product.slug,
+          categorySlug: product.categorySlug,
+          subcategorySlug: product.subcategorySlug,
+          productName: product.name,
+          brandName: product.brandName,
+          colourName: option ?? "Standard",
+          sizeBreakdown: [{ size: option ?? bundleUnitLabel(entry), qty: totalItems }],
+          totalQuantity: totalItems,
+          pricingSnapshot: {
+            unitBasePrice: perItemBase,
+            designFee: 0,
+            chartFirstLocationCost: 0,
+            chartAdditionalLocationCost: 0,
+            quantity: totalItems,
+            total: perItemBase * totalItems,
+            printRuleVersion: product.printRuleVersion,
+          },
+          mockupImages: {},
+          sides: drinkwareCfg.locations.map((type) => ({ type })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Couldn't start your design.");
+      router.push(`/studio/${data.id}`);
+    } catch (err) {
+      setStudioError(err instanceof Error ? err.message : "Couldn't start your design. Please try again.");
+      setStartingStudio(false);
+    }
+  }
+
+  function handleCustomQuote() {
+    const optionText = option ? ` (${option})` : "";
+    window.sessionStorage.setItem(
+      QUOTE_PREFILL_KEY,
+      `${product.name}${optionText} — custom printed, ${plural(totalItems, "unit")}`,
+    );
+    const line: QuoteCartHandoff = {
+      cartItemId: `drinkware-quote-${product.slug}-${option ?? "default"}-${crypto.randomUUID()}`,
+      name: product.name,
+      quantity: totalItems,
+      categorySlug: product.categorySlug,
+      categoryName,
+      subcategorySlug: product.subcategorySlug,
+      productSlug: product.slug,
+      colourName: option ?? undefined,
+    };
+    window.sessionStorage.setItem(QUOTE_CART_LINES_KEY, JSON.stringify([line]));
     router.push("/contact?type=quote");
   }
 
@@ -212,27 +294,72 @@ export function BundleConfigurator({
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={handleAddToCart}
-        disabled={unitPrice === null}
-        className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-maple-gradient px-6 py-3.5 text-sm font-semibold text-ink-950 disabled:opacity-50"
-      >
-        {added ? (
-          <>
-            <Check weight="bold" className="size-4" /> Added to cart
-          </>
-        ) : (
-          "Add to cart"
-        )}
-      </button>
-      <button
-        type="button"
-        onClick={handleRequestQuote}
-        className="mt-3 w-full text-center text-sm font-semibold text-ink-900 underline-offset-4 hover:underline"
-      >
-        Need printing or a larger order? Request a quote
-      </button>
+      {drinkwareCfg ? (
+        // Customizable drinkware: design is the primary action; blank "Add to cart" stays as a
+        // secondary option; a custom quote is the third path. Pack pricing above is untouched.
+        <>
+          <button
+            type="button"
+            onClick={handleDesign}
+            disabled={unitPrice === null || startingStudio}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-maple-gradient px-6 py-3.5 text-sm font-semibold text-ink-950 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {startingStudio ? <SpinnerGap className="size-4 animate-spin" weight="bold" /> : "Customize Your Product →"}
+          </button>
+          <p className="mt-2 text-center text-xs text-muted">Add your logo, text or artwork in Maple Studio.</p>
+          {studioError && (
+            <p className="mt-3 rounded-lg bg-crimson/10 px-3 py-2 text-xs font-medium text-crimson">{studioError}</p>
+          )}
+
+          <button
+            type="button"
+            onClick={handleAddToCart}
+            disabled={unitPrice === null}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-full border border-ink-950/20 px-6 py-3 text-sm font-semibold text-ink-900 transition-colors hover:bg-canvas disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {added ? (
+              <>
+                <Check weight="bold" className="size-4" /> Added to cart
+              </>
+            ) : (
+              "Add to cart — blank"
+            )}
+          </button>
+          <p className="mt-2 text-center text-xs text-muted">Undecorated packs, no printing.</p>
+
+          <button
+            type="button"
+            onClick={handleCustomQuote}
+            className="mt-4 w-full text-center text-sm font-semibold text-ink-900 underline-offset-4 hover:underline"
+          >
+            Request Custom Quote
+          </button>
+        </>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={handleAddToCart}
+            disabled={unitPrice === null}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-maple-gradient px-6 py-3.5 text-sm font-semibold text-ink-950 disabled:opacity-50"
+          >
+            {added ? (
+              <>
+                <Check weight="bold" className="size-4" /> Added to cart
+              </>
+            ) : (
+              "Add to cart"
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={handleRequestQuote}
+            className="mt-3 w-full text-center text-sm font-semibold text-ink-900 underline-offset-4 hover:underline"
+          >
+            Need printing or a larger order? Request a quote
+          </button>
+        </>
+      )}
     </div>
   );
 }

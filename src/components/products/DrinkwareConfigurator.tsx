@@ -7,6 +7,7 @@ import { getOrCreateClientSessionToken } from "@/lib/studio/session";
 import { DRINKWARE_VARIANTS, quoteDrinkware, type DrinkwareKind } from "@/lib/houseProducts/pricing/drinkware";
 import { isQuoteError } from "@/lib/houseProducts/pricing/types";
 import { OptionCardGrid, type OptionCardGridItem } from "@/components/products/OptionCardGrid";
+import { QUOTE_PREFILL_KEY, QUOTE_CART_LINES_KEY, type QuoteCartHandoff } from "@/components/cart/CartProvider";
 import type { CatalogueProduct } from "@/lib/products";
 
 /** One configurator shared across every drinkware kind (mug/tumbler/water-bottle/pint-glass) —
@@ -86,6 +87,24 @@ export function DrinkwareConfigurator({ product, kind }: { product: CataloguePro
     }
   }
 
+  function handleCustomQuote() {
+    window.sessionStorage.setItem(
+      QUOTE_PREFILL_KEY,
+      `${product.name} (${variant.label}) — custom printed, ${quantity} units`,
+    );
+    const line: QuoteCartHandoff = {
+      cartItemId: `drinkware-quote-${product.slug}-${variant.key}-${crypto.randomUUID()}`,
+      name: product.name,
+      quantity,
+      categorySlug: product.categorySlug,
+      subcategorySlug: product.subcategorySlug,
+      productSlug: product.slug,
+      colourName: variant.label,
+    };
+    window.sessionStorage.setItem(QUOTE_CART_LINES_KEY, JSON.stringify([line]));
+    router.push("/contact?type=quote");
+  }
+
   return (
     <div>
       <div>
@@ -133,9 +152,17 @@ export function DrinkwareConfigurator({ product, kind }: { product: CataloguePro
         disabled={isQuoteError(quote) || startingStudio}
         className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-maple-gradient px-6 py-3.5 text-sm font-semibold text-ink-950 transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
       >
-        {startingStudio ? <SpinnerGap className="size-4 animate-spin" weight="bold" /> : "Design This →"}
+        {startingStudio ? <SpinnerGap className="size-4 animate-spin" weight="bold" /> : "Customize Your Product →"}
       </button>
       <p className="mt-2 text-center text-xs text-muted">Add your logo, text or artwork in Maple Studio.</p>
+
+      <button
+        type="button"
+        onClick={handleCustomQuote}
+        className="mt-4 w-full text-center text-sm font-semibold text-ink-900 underline-offset-4 hover:underline"
+      >
+        Request Custom Quote
+      </button>
     </div>
   );
 }
